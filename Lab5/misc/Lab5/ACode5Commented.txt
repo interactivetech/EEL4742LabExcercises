@@ -1,0 +1,344 @@
+;----------------------------------------------------------------------
+	.cdecls C,LIST,"msp430fg4618.h" ; cdecls tells assembler
+
+	.sect ".sysmem" ; data ram for initialized
+
+LCD_SIZE .byte 11 ; eleven bytes needed by the LCD
+
+//Array of hex values that correspond the correct 0-F,-,Blank display on LCD
+numbers	.byte 0x5F,0x06,0x6B,0x2F,0x36
+		.byte 0x3D,0x7D,0x07,0x7F,0x3F
+		.byte 0x77,0x07C,0x59,0x6E,0x79,0x71,0x20,0x00
+;----------------------------------------------------------------------
+; Main Code
+;----------------------------------------------------------------------
+	.text ; program start
+	.global _START ; define entry point
+;----------------------------------------------------------------------
+START mov.w #300h,SP ; Initialize 'x1121
+; stackpointer
+StopWDT mov.w #WDTPW+WDTHOLD,&WDTCTL ; Stop WDT
+SetupP1 bis.b #04h,&P2DIR ; P2.2 output
+
+	; go initialize the LCD Display
+	call #Init_LCD
+
+	mov.w #LCDM3, R12    ;set up LCD memory pointer to R5
+	call #Init_UART ;initialize the uart
+
+Mainloop
+
+	;Get first two digits, for each number, put into R13 and R14
+	;Digits are converted in #ConverToHex and put into R15(1st#)
+	;and R14(2nd#)
+
+	call #INCHAR_UART   ;get input from keyboard
+	call #OUTA_UART     ;output the input to screen
+	mov.b R4, R6	    ;Digit1
+	mov.b R6, R13
+
+	call #INCHAR_UART   ;get input from keyboard
+	call #OUTA_UART     ;output the input to screen
+	mov.b R4, R7	    ;Digit2
+	mov.b R7, R14
+	call #ConvertToHex
+	mov R14, R15;		;R15 first number converted
+
+
+	call #INCHAR_UART   ;get input from keyboard
+	call #OUTA_UART     ;output the input to screen
+	mov.b R4, R8	    ;operator
+
+	call #INCHAR_UART   ;get input from keyboard
+	call #OUTA_UART     ;output the input to screen
+	mov.b R4, R9	    ;Digit1-input2
+	mov.b R9, R13
+
+	call #INCHAR_UART   ;get input from keyboard
+	call #OUTA_UART     ;output the input to screen
+	mov.b R4, R10	    ;Digit2-input2
+	mov.b R10, R14
+	call #ConvertToHex	;R14 second number converted
+
+
+	mov.b #0x3D, R4     ;go to next line and
+    	call #OUTA_UART     ;move cursor to beginnning of line
+
+	;Checks for each operator
+   	cmp #0x2B,R8
+    	jeq OpAdd	    ;if add, jump to OpAdd
+
+	cmp #0x2D,R8	    ;if sub, jump to OpSub
+    	jeq OpSub
+
+   	;otherwise multiply
+	mov #0, R11	    ;Result of multiplaction
+	mov R14, R8	    ;Move 2nd number to R8(looks at 1s and 0s to add 1st# to result or not)
+	mov R15, R9	    ;puts first input into a shifting register
+
+
+	mov #1, R10	    ;used to check to see if we need to add output or end loop
+Loop
+	cmp #256, R10	    ;check to see if we are done with loop
+	jeq OutputMul	    ;output if were done
+	and R10, R8  	    ;checking to see if we need to add number to answer
+	cmp #0, R8	    ;if zero is result then we do not need to add to the output
+	jeq Next
+
+	add R9, R11	    ;if current digit in R8 was 1, add current number in R9 to output
+
+Next
+	rla R10		    ;shift counting register
+	rla R9		    ;shift shifting register
+	mov R14, R8	    ;reset checking register(no shift bc r10 shifts)
+	jmp Loop
+
+OutputMul		    ;Function to print fourth digit(special case for multiplaction)	    
+
+	mov R11, R15	    ;Move output to R15, R15 will hold final output for all cases
+	mov R15, R4	    ;Move to R4 to print fourth digit(multiplaction only)
+    	and #0xF000, R4	    ;get fourth digit
+	rra R4		    ;shift by 12
+	rra R4
+	rra R4
+	rra R4
+	rra R4
+	rra R4
+	rra R4
+	rra R4
+	rra R4
+	rra R4
+	rra R4
+	rra R4;12
+	and #0x000F, R4	    ;cast digit
+
+	mov.b R4, R11	    ;move to R11 to be converted to printable ascii	
+	call #ConvertToAscii
+
+
+	mov.b numbers(R4), R6      ;send to LCD memory for display
+    	mov.b R6, 3(R12)
+
+    	mov.b R11, R4
+    	call #OUTA_UART 	;output to HyperTerminal
+    	jmp Outputs		;Jump to ouput last three digits
+
+
+OpAdd
+	mov #17, R4	       ;Make fourth digit blank
+	mov.b numbers(R4), R6  ;send a to LCD memory for display
+        mov.b R6, 3(R12)	
+
+	add R14, R15	       ;Add two numbers and output
+	jmp Outputs
+
+OpSub
+
+	mov #17, R4		;Make fourth digit blank
+	mov.b numbers(R4), R6   ;send a to LCD memory for display
+   	mov.b R6, 3(R12)
+
+	cmp R14, R15		;Check for negative case
+	jn Negative
+
+	sub R14, R15		;otherwise subtract and output
+	jmp Outputs
+
+Negative
+	mov.b #16, R4		;print negative sign LCD
+	mov.b numbers(R4), R6   ;send a to LCD memory for display
+    	mov.b R6, 2(R12)
+
+	mov.b #0x2D, R4        ;print negative sign HyperTerminal
+    	call #OUTA_UART       
+
+    	mov.b #1, R7		;set negative check register to 1
+	sub R15, R14		;subtract oppsite direction
+	mov.b R14, R15		;move to R15
+
+Outputs
+
+	cmp #1,R7	;if negative, digit3 already printed, go to digit2
+	jeq Digit2
+
+	mov R15, R4	;Move output to R4 to get third digit
+    	and #0xF00, R4	;get third digit and shift 8
+	rra R4
+	rra R4
+	rra R4
+	rra R4
+	rra R4
+	rra R4
+	rra R4
+	rra R4
+	mov.b R4, R11   ;move digit to R11 to convert to printable ascii
+	call #ConvertToAscii
+
+	mov.b numbers(R4), R6    ;print to LCD
+   	mov.b R6, 2(R12)
+
+    	mov.b R11, R4
+   	call #OUTA_UART    ;print to HyperTerminal
+
+Digit2
+
+	mov R15, R4	;Move output to R4 to get 2nd digit
+   	and #0xF0, R4	;get 2nd digit and shift 4
+	rra R4
+	rra R4
+	rra R4
+	rra R4
+	mov.b R4, R11	;move digit to R11 to convert to printable ascii
+	call #ConvertToAscii
+
+   	mov.b numbers(R4), R6       ;print to LCD
+   	mov.b R6, 1(R12)
+
+	mov.b R11, R4
+    	call #OUTA_UART 	;print to HyperTerminal
+
+	;Prints final digit
+  	mov R15, R4
+   	and #0x0F, R4
+   	mov.b R4, R11		;move digit and conver to ascii
+	call #ConvertToAscii
+
+   	mov.b numbers(R4), R6   ;print to LCD
+   	mov.b R6, 0(R12)
+
+	mov.b R11, R4
+   	call #OUTA_UART		;print to HyperTerminal
+
+	mov.b #0x0D, R4 ;go to next line and
+	call #OUTA_UART ;move cursor to beginnning of line
+	mov.b #0x0A, R4
+	call #OUTA_UART
+
+	jmp Mainloop
+
+ConvertToAscii
+
+	cmp #10,R11        ;check if value is a decimal
+	jn number
+
+	add #0x37, R11	   ;otherwise letter, add 37
+	jmp finish1
+
+number
+	add #0x30, R11
+
+finish1
+	ret
+
+ConvertToHex
+
+	cmp #58,R13        ;check if value is a decimal
+    	jn decimal1
+
+    	sub #55,R13        ;otherwise its a letter subtract 55
+    	jmp input2
+
+decimal1
+
+    	sub #48,R13      ;sub 48 if value is decimal
+
+input2
+
+    	cmp #58,R14      ;same process for 2nd input(R7)
+    	jn decimal2
+
+   	sub #55,R14      ;value is a letter, convert
+    	jmp finish
+
+decimal2            ;value is a number
+
+   	 sub #48,R14      ;convert
+
+finish
+
+    	;rotate left 4, for first digit
+   	rla R13
+    	rla R13
+    	rla R13
+    	rla R13
+   	add R13,R14        ;add the two inputs after rotated
+
+	ret
+
+;rest of code unmodified
+OUTA_UART
+;----------------------------------------------------------------
+; prints to the screen the ASCII value stored in register 4 and
+; uses register 5 as a temp value
+;----------------------------------------------------------------
+
+	push R5
+
+;buffer delay
+lpa 	mov.b &IFG2,R5
+	and.b #0x02,R5
+	cmp.b #0x00,R5
+	jz lpa
+
+	mov.b R4,&UCA0TXBUF
+	pop R5
+	ret
+
+INCHAR_UART
+;----------------------------------------------------------------
+; returns the ASCII value in register 4
+;----------------------------------------------------------------
+	push R5
+lpb 	mov.b &IFG2,R5
+	and.b #0x01,R5
+	cmp.b #0x00,R5
+	jz lpb
+	mov.b &UCA0RXBUF,R4
+	pop R5
+; go get the char from the receive buffer
+	ret
+
+Init_UART
+;----------------------------------------------------------------
+; Initialization code to set up the uart on the experimenter board to 8 data,
+; 1 stop, no parity, and 9600 baud, polling operation
+;----------------------------------------------------------------
+
+ 	mov.b #0x30,&P2SEL
+	mov.b #0x00,&UCA0CTL0
+	mov.b #0x41,&UCA0CTL1
+	mov.b #0x00,&UCA0BR1
+	mov.b #0x03,&UCA0BR0
+	mov.b #0x06,&UCA0MCTL
+	mov.b #0x00,&UCA0STAT
+	mov.b #0x40,&UCA0CTL1
+	mov.b #0x00,&IE2
+	ret
+;----------------------------------------------------------------------
+; Initialize the LCD system
+;----------------------------------------------------------------------
+Init_LCD
+; the LCD segment
+; R6 is a loop counter to cover all of the segments
+; including all special characters
+	mov.b #0x00, R6
+	mov.w #LCDM3, R5
+	mov.b #0x00, R7
+lpt mov.b R7, 0(R5)
+	inc.w R5
+	inc.b R6
+; See if the loop is finished
+	cmp.b LCD_SIZE, R6
+	jnz lpt
+	mov.b #0x1C, &P5SEL
+	mov.b #0x00, &LCDAVCTL0
+	mov.b #0x7E, &LCDAPCTL0
+	mov.b #0x7d, &LCDACTL
+	ret
+
+;----------------------------------------------------------------------
+; Interrupt Vectors
+;----------------------------------------------------------------------
+	.sect ".reset" ; MSP430 RESET Vector
+	.short START ;
+	.end

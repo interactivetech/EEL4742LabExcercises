@@ -1,0 +1,66 @@
+//---------------------------------------------------------------------
+// LCD Driver for the for MSP 430X4XXX experimenter board using
+// Softbaugh LCD
+// Davies book pg. 259, 260
+//---------------------------------------------------------------------
+#include "msp430fg4618.h"
+#include "stdio.h"
+void Init_LCD(void);
+unsigned char *LCDSeg = (unsigned char *) &LCDM3;
+int LCD_SIZE=11;
+int main(void){
+volatile unsigned char a;
+volatile unsigned int i, j[20], k; // volatile to prevent optimization
+WDTCTL = WDTPW + WDTHOLD; // Stop watchdog timer
+// setup pprt 3 as an output so to be able to turn on the LED
+P2DIR |= 0x02; // Set P1.0 to output direction
+// go Initialize the LCD
+Init_LCD();
+
+//Save the values for digits and letters to display
+j[0] = 0x5F;
+j[1] = 0X06;
+j[2] = 0X6B;
+j[3] = 0X2F;
+j[4] = 0X36;
+j[5] = 0X3D;
+j[6] = 0X7D;
+j[7] = 0X07;
+j[8] = 0X7F;
+j[9] = 0X37;
+j[10] = 0X77;
+j[11] = 0X7C;
+j[12] = 0X68;
+j[13] = 0X6E;
+j[14] = 0X79;
+j[15] = 0X71;
+
+// infinite loop to display values
+for (;;){
+	//Display values on the rightmost segment
+	for (k=0; k<16; k++){
+			LCDSeg[0]= j[k];
+			 i = 65000; // SW Delay
+			 do i--;
+			 while (i != 0);
+
+			 P2OUT ^= 0x02; // Toggle P1.0 using exclusive-OR
+			 i = 10000; // SW Delay
+			 do i--;
+			 while (i != 0);
+		}
+
+
+}
+}
+// Initialize the LCD system
+void Init_LCD(void){
+int n;
+for (n=0;n<LCD_SIZE;n++){
+*(LCDSeg+n) = 0;
+}
+P5SEL = 0x1C;
+LCDAVCTL0 = 0x00;
+LCDAPCTL0 = 0x7E;
+LCDACTL = 0x7d;
+}

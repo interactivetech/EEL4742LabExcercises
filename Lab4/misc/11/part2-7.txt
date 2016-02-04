@@ -1,0 +1,376 @@
+
+;----------------------------------------------------------------------
+		.cdecls C,LIST,"msp430fg4618.h" ; cdecls tells assembler
+; to allow
+; the device header file
+;----------------------------------------------------------------------
+; #LCDM3 is the start of the area of memory of the TMS430 that points
+; to the segments
+; of the softbaugh LCD LCDM3 = the starting address
+; each of the seven segments for each display is store in memory
+; starting at address LCDM3
+; which is the right most seven segment of the LCD
+; The bit order in each byte is
+; dp, E, G, F, D, C, B, A or
+; :, E, G, F, D, C, B, A
+; after the seven segments these memory locations are used to turn on
+; the special characters
+; such as battery status, antenna, f1-f4, etc.
+; there are 7 seven segment displays
+; data area ram starts 0x1100
+;----------------------------------------------------------------------
+; the .sect directives are defined in lnk_msp430f4618.cmd
+; .sect ".stack" ; data ram for the stack
+; .sect ".const" ; data rom for initialized data
+; constants
+; .sect ".text" ; program rom for code
+; .sect ".cinit" ; program rom for global inits
+; .sect ".reset" ; MSP430 RESET Vector
+		.sect ".sysmem" ; data ram for initialized
+; variables
+; there are 11 locations that are needed for the softbaugh LCD
+; only 7 used for the seven segment displays
+LCD_SIZE
+		.byte 11 ; eleven bytes needed by the LCD
+
+Digits
+		.byte 0x5F,0x06,0x6B,0x2F,0x36,0x3D,0x7D,0x07,0x7F,0x37
+
+; This is the code area
+; flash begins at address 0x3100
+;----------------------------------------------------------------------
+; Main Code
+;----------------------------------------------------------------------
+		.text ; program start
+		.global _START ; define entry point
+;----------------------------------------------------------------------
+START 	mov.w #300h,SP 	; Initialize 'x1121
+						; stackpointer
+						
+StopWDT mov.w #WDTPW+WDTHOLD,&WDTCTL ; Stop WDT
+		mov.w #0x00, &P1DIR			;sets directions of sw1 and sw2 to input
+		call #Init_LCD				; go initialize the LCD Display
+		
+		;R4=y, R5=z, R6=x, R7= address of Digits, R8= address of LCDseg, R9=P1IN, R10=temp
+		;R11= modular variable and result of modular operation will be in R11
+
+		mov.w #0x00,R4			;R4 will be the global counter that counts from 0 to 999
+		
+		;R4 is set to -1 at the beginning of the program so at the end of each iteration
+		;R4 points to the actual number been display in the LCD screen
+		dec.w R4			
+		
+		;sets R5 and R6 to 0x00
+		mov.w #0x00, R5			
+		mov.w #0x00, R6
+		
+		mov.w #Digits, R7		;load address of array Digits to R7
+		mov.w #LCDM3, R8		;load address of LCDM3 to R8
+		mov.b 0(R7), 0(R8)		;display the first character of array Digits( 0x00) to the LCD screen
+
+;------Two subroutines are created because they are used in various location of the program
+;------Modular100: gets a number in R11 and returns R4%100 in R4 -------------;
+;------Modular10: gets a number in R11 and returns R4%10 in R4 ---------------;
+
+MainLoop
+		mov.w &P1IN, R9			;load the value of P1IN to R9
+		and.w #0x01, R9			;AND it with 0x01 to check if sw1 is press
+		jz if					;if sw1 press, jump to if
+
+		mov.w &P1IN, R9			;load the value of P1IN to R9
+		and.w #0x02, R9			;AND it with 0x02 to check if sw2 is press
+		jz if2					;if sw2 press, jump to if2
+
+		jmp MainLoop			;if not switch is press, keep jumping to MainLoop until one of the switches is press
+
+;----if SW1 is press----;
+if		inc.w R4				;increment global counter R4 by 1	
+		mov.w #0x3E8, R10		;move 1000 to R10
+		
+		;if R4==1000, the display went from 999 to 0, it overwrites R4,R5, and R6 
+		;and it displays the number 0 in the LCD display right most segment
+		cmp.w R4,R10		
+		jz reset				;jump to reset if R4==1000
+
+		mov.w #0x00, R10		;move 0x00 to R10
+		cmp.w R4, R10			;compare R4 with 0x00
+		jz forY					;if R4==0x00 jump to forY
+
+		mov.w R4, R11			;move R4 to R11 so it can be used in procedure modular100
+		call #modular100		;after the call, R11 will have the result of R4%100
+		mov.w #0x00, R10		
+		cmp.w R11,R10			;compare the result to 0x00
+		jz incZ					;if the result is 0x00 jump to incZ
+
+
+toX		mov.w R4, R11			;move R4 to R11 so it can be used in procedure modular10
+		call #modular10			;after the call, R11 will have the result of R4%10
+		mov.w #0x00, R10		
+		cmp.w R11, R10			;compare the result to 0x00
+		jz incX					;if the result is 0x00 jump to incX
+
+		jmp forY				;else jump to forY
+
+
+reset	;Overwrites R4,R5, and R6 to 0x00
+		mov.w #0x00,R6
+		mov.w #0x00,R5
+		mov.w #0x00,R4
+		mov.b #0x00, 2(R8)		;clears LCDM3[2]
+		mov.b #0x00, 1(R8)		;clears LCDM3[1]
+		mov.b 0(R7), 0(R8)		;displays the number 0 in the LCD screen
+		jmp delay				;jumps to delay
+
+incZ
+		inc.w R5				;increment R5(z counter) by 1
+		mov.w R7, R10			;move base address of digits to R10
+		add.w R5, R10			;add base address with index z counter
+		mov.b 0(R10), 2(R8)		;display the new number in the LCD display
+		jmp toX					;jump to toX
+
+incX
+		inc.w R6				;increment x counter by one, (R6++)
+		mov.w R6, R11			;move x counter to R11	
+		call #modular10			;R11=x%10
+		mov.w R7, R10			;move base address to R10
+		add.w R11,R10			;add base address to index x counter
+		mov.b 0(R10), 1(R8)		;display the new number in the LCD display
+
+forY	mov.w R4,R11			;move R4 to R11
+		call #modular10			;call subroutine modular10, result will be in R11
+		mov.w R7,R10			;move base address of digits to temp R10
+		add.w R11,R10			;add result of modular operation to R10
+		mov.b 0(R10), 0(R8)		;updates the LCD display of the right most LCD segment
+		jmp delay				;jump to delay
+
+
+;----if SW2 is press----;
+if2		dec.w R4				;decrement global counter by 1
+		mov.w #0xFFFF,R10		;move -1 to R10
+		cmp.w R10,R4			;compare global counter to -1, if is true it means it went from 0 to 999, it needs to set the new values
+		jz	set					;jump to set
+
+		mov.w R4, R11			;move global counter to R11 to get the modular operation result
+		call #modular10			;R11=R4%10
+		mov.w R7,R10			;move base address of digits to temp R10
+		add.w R11,R10			;add result of modular operation to R10
+		mov.b 0(R10), 0(R8)		;updates the LCD display of the right most LCD segment
+
+		mov.w #0x00, R10
+		cmp.w R10, R4			;compare 0x00 to R4
+		jz delay				;if it is equal, jump to delay
+
+		mov.w R4,R11			;move global counter to R11 to get the modular operation result
+		call #modular10			;R11=R4%10
+		mov.w #0x09, R10		
+		cmp.w R10,R11			;compare 0x09 with R11
+		jz decX					;if equal, jump to decX
+		jmp continue			;else jump to continue
+
+decX	dec.w R6				;decrement x by one
+		mov.w #0x00, R10		
+		cmp.w R10, R6			;if x counter has reach 0, jump to decXelse
+		jnz	decXelse			;jump to decXelse
+
+		cmp.w R10, R5			;if z counter has reach 0, jump to decXelse
+		jnz decXelse			;jump to decXelse
+
+		mov.b R10, 1(R8)		;else R5==0 && R6==0 and the number went from 10 to 9 and the LCDSeg[1] needs to be clear in the LCD display
+		jmp continue			;jump to continue
+
+decXelse
+		mov.w R6, R11			;move R6 to R11
+		call #modular10			;R11=R6%10
+		mov.w R7, R10			;move base address of digits to R10
+		add.w R11,R10			;R10=&digits[R11]
+		mov.b 0(R10),1(R8)		;displays the updated number to the LCD display
+
+continue
+		mov.w R4, R11			;move R4 to R11
+		call #modular100		;R11=R4%100
+		mov.w #0x63, R10		;move 100 to R10
+		cmp.w R10, R11			;compare the modular operation result with 100
+		jz	decZ				;if equal, jump to decZ
+		jmp delay				;else jump to delay
+
+decZ	dec.w R5				;decrement the z counter by 1
+		mov.w #0x00, R10		
+		cmp.w R10, R5			;compare if z counter has reach 0x00
+		jz	clear				;if z==0, jump to clear
+
+		mov.w R7, R10			;else move array digits base address to R10
+		add.w R5, R10			;R10=&digits[z]
+		mov.b 0(R10), 2(R8)		;displays the updated number to the LCD display
+		jmp delay				;jump to delay
+
+clear	mov.b R10, 2(R8)		;if z==0, the number went from 100 to 99 and LCDSeg[2] needs to be clear in the LCD display
+		jmp delay				;jump to delay
+		
+
+set		mov.w #0x63,R6		;move 99 to R6
+		mov.w #0x09,R5		;move 9 to R5
+		mov.w #0x3E7, R4	;move 999 to R4
+		
+;------ updates the display to show 999 in the LCD display
+		mov.b 9(R7), 2(R8)
+		mov.b 9(R7), 1(R8)
+		mov.b 9(R7), 0(R8)
+		jmp delay			;do a delay after displaying the number 999 in the LCD display
+
+
+
+
+;-------delays each iteration so the numbers can change at a pace
+;-------the human eye can see
+delay	mov.w #0xFFFF,R10 	; move 0xFFFF to R10
+
+L1		dec.w R10 			; Decrement R10
+		jnz L1 				; Delay over?
+		jmp MainLoop		; if delay is over, jump to MainLoop
+
+
+;--------modular100 gets what is in R11 and find its modular operation by 100 R11%100
+;--------return the result in R11 --------------------------------------------------;
+modular100	mov.w #0x64, R10
+			cmp.w R10, R11
+			jge modular1002
+			ret
+
+modular1002
+			sub.w #0x64,R11		;subtract 100 from R11
+			jmp modular100
+
+;--------modular10 gets what is in R11 and find its modular operation by 10 R11%10
+;--------return the result in R11 -------------------------------------------------;
+modular10 	mov.w #0xA, R10
+			cmp.w R10, R11
+			jge	modular102
+			ret
+
+modular102
+			sub.w #0xA,R11		;subtract 10 from R11
+			jmp modular10
+			
+
+; LCD_SIZE-4 only gives the 7 segment displays plus DP, and
+; colons (colons = dp)
+; Right most display is at LCDSeg[0];
+; R6 is a loop counter to cover all of the segments. This count
+; counts up from 0
+		;mov.b #0x00, R6
+; R5 points to the beginning memory for the LCD
+; Turn on all of the segments
+; LCD_SIZE-4 only gives the 7 segment displays plus DP, and
+; colons: colons = dp
+; Right most display is at LCDSeg[0];
+; To turn on a segment of the LCD a one is written in the
+; the appropriate location in the LCD memory
+; Setting all the bits to 1 for all memory locations turns on
+; all of the display elements
+; including all special characters
+		;mov.w #LCDM3, R5
+; move 0xff into R7 to turn on all LCD segments the LCD memory
+		;mov.b #0xFF, R7
+;lpt1 	mov.b R7, 0(R5)
+; Increment R5 to point to the next seven segment display
+; Increment R6 for the next count inthe loop
+		;inc.w R5
+		;inc.b R6
+; See if the loop is finished / finish writng to the last display
+; element
+		;cmp.b LCD_SIZE, R6
+		;jnz lpt1
+; Blink the green LED to make sure the code is running ;
+
+
+
+
+;----------------------------------------------------------------------
+; Initialize the LCD system
+;----------------------------------------------------------------------
+Init_LCD
+; Using the LCD A controller for the MSP430fg4618
+; the pins of the LCD are memory mapped onto the mp430F4xxx
+; memory bus and
+; are accessed via LCDSeg[i] array
+; See page 260 of Davie's text
+; LCD_SIZE-4 only gives the 7 segment displays plus DP, and
+; (colons are the same bit setting)
+; LCD_SIZE-4 only gives the 7 segment displays plus DP, and
+; colons: colons / dp
+; Right most seven segment display is at LCDSeg[0];
+; Display format
+; AAA
+; F B
+; X F B
+; GGG
+; X E C
+; E C
+; DP DDD
+; bit order
+; dp, E, G, F, D, C, B, A or
+; :, E, G, F, D, C, B, A
+; initialize the segment memory to zero to clear the LCD
+; writing a zero in the LCD memory location clears turns off
+
+; the LCD segment
+; R6 is a loop counter to cover all of the segments
+; including all special characters
+		mov.b #0x00, R6
+; R5 points to the beginning memory for the LCD
+		mov.w #LCDM3, R5
+; move 0 into R7 to clear the LCD memory
+		mov.b #0x00, R7
+lpt
+		mov.b R7, 0(R5)
+; Increment R5 to point to the next seven segment display
+; Increment R6 for the next count in the loop
+		inc.w R5
+		inc.b R6
+; See if the loop is finished
+		cmp.b LCD_SIZE, R6
+		jnz lpt
+; Port 5 ports 5.2-5.4 are connected to com1,com2,com3 of LCD
+; com0 fixed and already assigned
+; Need to assign com1 - com3 to port5
+; BIT4 | BIT3 |BIT2 = 1 P5.4, P.3, P5.2 = 1
+		mov.b #0x1C, &P5SEL
+; Used the internal voltage for the LCD bit 4 = 0 (VLCDEXT=0)
+; internal bias voltage set to 1/3 of Vcc, charge pump
+; disabled,
+; page 26-25 of MSP430x4xx user manual
+		mov.b #0x00, &LCDAVCTL0
+; LCDS28-LCDS0 pins LCDS0 = lsb and LCDS28 = MSB need
+; LCDS4 through LCDS24
+; from the experimenter board schematic the LCD uses S4-S24,
+; S0-S3 are not used here
+; Only use up to S24 on the LCD 28-31 not needed.
+; Also LCDACTL1 not required since not using S32 - S39
+; Davie's book page 260
+; page 26-23 of MSP430x4xx user manual
+		mov.b #0x7E, &LCDAPCTL0
+; The LCD uses the ACLK as the master clock as the scan
+; rate for the display segments
+; The ACLK has been set to 32768 Hz with the external 327768 Hz
+; crystal
+; Let's use scan frequency of 256 Hz (This is fast enough not
+; to see the display flicker)
+; or a divisor of 128
+; LCDFREQ division(3 bits), LCDMUX (2 bits), LCDSON segments
+; on, Not used, LCDON LCD module on
+; 011 = freq /128, 11 = 4 mux's needed since the display uses
+; for common inputs com0-com3
+; need to turn the LCD on LCDON = 1
+; LCDSON allows the segments to be blanked good for blinking
+; but needs to be on to
+; display the LCD segments LCDSON = 1
+; Bit pattern required = 0111 1101 = 0x7d
+; page 26-22 of MSP430x4xx user manual
+		mov.b #0x7d, &LCDACTL
+		ret
+;----------------------------------------------------------------------
+; Interrupt Vectors
+;----------------------------------------------------------------------
+		.sect ".reset" ; MSP430 RESET Vector
+		.short START ;
+		.end

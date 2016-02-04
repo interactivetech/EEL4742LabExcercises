@@ -1,0 +1,83 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;This program converts lower-case to upper-case or vice-versa
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	.cdecls C,LIST,"msp430fg4618.h"
+	; cdecls tells assembler to allow the device header file
+	.bss label, 4 ; allocates 4 bytes of uninitialized memory with the name label
+	.word 0x1234 ; example of defining a 16 bit word
+	.sect ".const" ; initialized data rom
+	.text ; program start
+	.global _START ; define entry point
+
+START mov.w #300h,SP ; Initialize 'x1121 stackpointer
+StopWDT mov.w #WDTPW+WDTHOLD,&WDTCTL ; Stop WDT
+SetupP1 call #Init_UART ; go initialize the uart
+
+Mainloop
+	call #INCHAR_UART	;receive char
+	mov R4, R8			;save in R8
+	mov R8, R9			;copy to R9
+	call #OUTA_UART		;Display input
+	mov #0xA, R4		;Newline -> R4
+	call #OUTA_UART		;Display new line
+	mov #0xD, R4		;CR
+	call #OUTA_UART
+
+	sub #0x61, R9		;check if upper-case
+	jn Makelower
+	jmp Makeupper
+
+Makelower add #0x20, R8	;converts to lower-case
+	jmp print
+
+Makeupper sub #0x20, R8	;converts to upper-case
+
+
+print
+	mov R8, R4		;Load letter to be printed
+	call #OUTA_UART	;display char
+	mov #0xA, R4	;Newline -> R4
+	call #OUTA_UART	;Display new line
+	mov #0xD, R4	;CR
+	call #OUTA_UART
+
+	jmp Mainloop 	;Loop forever
+
+
+OUTA_UART ; prints value stored in register 4 and uses register 5 as a temp value
+	push R5
+lpa mov.b &IFG2,R5
+	and.b #0x02,R5
+	cmp.b #0x00,R5
+	jz lpa
+	; send the data to the transmit buffer UCA0TXBUF = A;
+	mov.b R4,&UCA0TXBUF
+	pop R5
+	ret
+
+INCHAR_UART ; returns the ASCII value in register 4
+; wait for the receive buffer is full before getting the data
+	push R5
+lpb mov.b &IFG2,R5
+	and.b #0x01,R5
+	cmp.b #0x00,R5
+	jz lpb
+	mov.b &UCA0RXBUF,R4
+	pop R5
+	ret 	; go get the char from the receive buffer
+
+Init_UART
+	mov.b #0x30,&P2SEL ; transmit and receive to port 2 b its 4 and 5
+	mov.b #0x00,&UCA0CTL0 ;8 data, no parity 1 stop, uart, async
+	mov.b #0x41,&UCA0CTL1 ;UART mode, (0) 0 = async, UCA0CTL1= 0x41;
+	mov.b #0x00,&UCA0BR1 ;UCA0BR1=0 upper byte of divider clock word
+	mov.b #0x03,&UCA0BR0 ;clock divide from a clock to bit clock 32768/9600 = 3.413
+	mov.b #0x06,&UCA0MCTL ;for the baud rate
+	mov.b #0x00,&UCA0STAT ;do not loop the transmitter back to the receiver for echoing
+	mov.b #0x40,&UCA0CTL1 ; take UART out of reset
+	mov.b #0x00,&IE2 ; turn transmit interrupts off
+	ret
+	.sect ".reset" ; MSP430 RESET Vector
+	.short START ;
+	.end

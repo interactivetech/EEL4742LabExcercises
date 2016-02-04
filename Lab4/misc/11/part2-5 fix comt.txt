@@ -1,0 +1,60 @@
+;----------------------------------------------------------------------
+		.cdecls C,LIST,"msp430fg4618.h" ; cdecls tells assembler
+; to allow
+; the device header file
+;----------------------------------------------------------------------
+; #LCDM3 is the start of the area of memory of the TMS430 that points
+; to the segments
+; of the softbaugh LCD LCDM3 = the starting address
+; each of the seven segments for each display is store in memory
+; starting at address LCDM3
+; which is the right most seven segment of the LCD
+; The bit order in each byte is
+; dp, E, G, F, D, C, B, A or
+; :, E, G, F, D, C, B, A
+; after the seven segments these memory locations are used to turn on
+; the special characters
+; such as battery status, antenna, f1-f4, etc.
+; there are 7 seven segment displays
+; data area ram starts 0x1100
+;----------------------------------------------------------------------
+; the .sect directives are defined in lnk_msp430f4618.cmd
+; .sect ".stack" ; data ram for the stack
+; .sect ".const" ; data rom for initialized data
+; constants
+; .sect ".text" ; program rom for code
+; .sect ".cinit" ; program rom for global inits
+; .sect ".reset" ; MSP430 RESET Vector
+		.sect ".sysmem" ; data ram for initialized
+; variables
+; there are 11 locations that are needed for the softbaugh LCD
+; only 7 used for the seven segment displays
+LCD_SIZE
+		.byte 11 ; eleven bytes needed by the LCD
+
+Digits
+		.byte 0x5F,0x06,0x6B,0x2F,0x36,0x3D,0x7D,0x07,0x7F,0x37,0x77,0x7C,0x59,0x6E,0x79,0x71
+
+; This is the code area
+; flash begins at address 0x3100
+;----------------------------------------------------------------------
+; Main Code
+;----------------------------------------------------------------------
+		.text ; program start
+		.global _START ; define entry point
+;----------------------------------------------------------------------
+START 	mov.w #300h,SP ; Initialize 'x1121
+; stackpointer
+StopWDT mov.w #WDTPW+WDTHOLD,&WDTCTL ; Stop WDT
+
+; go initialize the LCD Display
+		call #Init_LCD
+
+		mov.w #0x02,R4
+		mov.b Digits(R4), R4
+		mov.w #LCDM3, R5
+		add.w #0x06, R5
+		mov.b R4, 0(R5)
+
+Mainloop
+		jmp Mainloop

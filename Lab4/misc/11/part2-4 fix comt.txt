@@ -1,0 +1,6 @@
+call #Init_LCD
+
+		mov.w #0x02,R4
+		mov.b Digits(R4), R4
+		mov.w #LCDM3, R5
+		mov.b R4, 0(R5)

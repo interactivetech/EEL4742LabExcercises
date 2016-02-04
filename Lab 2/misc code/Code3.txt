@@ -1,0 +1,117 @@
+C Program 3: Part 10
+//---------------------------------------------------------------
+// Console I/O through the on board UART for MSP 430X4XXX
+//---------------------------------------------------------------
+void Init_UART(void);
+void OUTA_UART(unsigned char A);
+unsigned char INCHAR_UART(void);
+void sendstring(char* word);		//send method declared
+
+#include "msp430fg4618.h"
+#include "stdio.h"
+
+int main(void){
+
+	WDTCTL = WDTPW + WDTHOLD; // Stop watchdog timer
+	Init_UART();
+
+	//Four strings for each possible state of switches
+	char left[]="SW1 = 1,SW2 = 0";
+   	char right[]="SW1 = 0,SW2 = 1";
+  	char neither[]="SW1 = 0,SW2 = 0";
+  	char both[]="SW1 = 1,SW2 = 1";
+
+	//set intial state as zero meaning null
+	//states allow the program to allow print on change of state, so that\
+	//when holding SW1 hyperterminal does not continue to print chat left
+	int state=0;
+
+	for (;;)                    //run forever
+   	{
+
+		//checks for switch 1 and if it is not in current state
+       		if(0x01 == P1IN && 1 != state)        
+       		{
+          		sendstring(right);        //outputs right string
+           		state = 1;		  //Sets state to SW1 pressed
+       		}
+
+		//checks for switch 2 and if it is not in current state
+       		if(0x02 == P1IN && 2 != state)        
+       		{
+         		sendstring(left);        //outputs left string
+          		state = 2;		 //Sets state to SW2 pressed
+       		}
+
+		//checks for both switches and if it is not in current state
+       		if(0x00 == P1IN && 3 != state)        
+      		{
+         		sendstring(both);        //outputs both
+          		state = 3;		 //Sets state to SW1 and SW2 pressed
+      		}
+
+		//checks for nothing and if it is not in current state
+       		if(0x03 == P1IN && 4 != state)        
+       		{
+           		sendstring(neither);    //outputs neither
+          		state = 4;		//Sets state to neigther pressed
+       		}
+	}
+}
+
+//This function should send in the string to output one char at a time
+void send(char *str){
+
+	int i;
+
+	//Loop to run for as long as stringA(str) is, ie for each char
+	for(i=0;i<strlen(str);i++) {
+		OUTA_UART(str[i]);	//send in each char to outa which prints it
+	}
+
+	//prints next line and moves cursor
+	OUTA_UART(0x0A);
+	OUTA_UART(0x0D);
+}
+
+
+//rest of code unmodified
+
+void OUTA_UART(unsigned char A){
+//---------------------------------------------------------------
+//***************************************************************
+//---------------------------------------------------------------
+// IFG2 register (1) = 1 transmit buffer is empty,
+// UCA0TXBUF 8 bit transmit buffer
+// wait for the transmit buffer to be empty before sending the
+// data out
+do{
+  }while ((IFG2&0x02)==0);
+// send the data to the transmit buffer
+UCA0TXBUF =A;
+}
+
+
+void Init_UART(void){
+//---------------------------------------------------------------
+// Initialization code to set up the uart on the experimenter
+// board to 8 data,
+// 1 stop, no parity, and 9600 baud, polling operation
+//---------------------------------------------------------------
+P2SEL=0x30; // transmit and receive to port 2 b its 4 and 5
+
+UCA0CTL0=0; // 8 data, no parity 1 stop, uart, async
+
+UCA0CTL1= 0x41;
+
+UCA0BR1=0; // upper byte of divider clock word
+UCA0BR0=3; // clock divide from a clock to bit clock 32768/9600
+
+UCA0MCTL=0x06;
+
+UCA0STAT=0; // do not loop the transmitter back to the
+
+UCA0CTL1=0x40;
+
+IE2=0; // turn transmit interrupts off
+}

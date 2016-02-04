@@ -1,0 +1,151 @@
+;----------------------------------------------------------------------
+	.cdecls C,LIST,"msp430fg4618.h" ; cdecls tells assembler
+
+	.sect ".sysmem" ; data ram for initialized
+
+LCD_SIZE .byte 11 ; eleven bytes needed by the LCD
+
+//Array of hex values that coorespond the correct 0-F display on LCD
+numbers	.byte 0x5F,0x06,0x6B,0x2F,0x36
+	.byte 0x3D,0x7D,0x07,0x7F,0x3F
+	.byte 0x77,0x07C,0x59,0x6E,0x79,0x71
+;----------------------------------------------------------------------
+; Main Code
+;----------------------------------------------------------------------
+	.text ; program start
+	.global _START ; define entry point
+;----------------------------------------------------------------------
+START mov.w #300h,SP ; Initialize 'x1121
+; stackpointer
+StopWDT mov.w #WDTPW+WDTHOLD,&WDTCTL ; Stop WDT
+SetupP1 bis.b #04h,&P2DIR ; P2.2 output
+
+Mainloop
+
+	call #Init_LCD		; go initialize the LCD Display
+
+	mov.b #0x00, R7		;a(LSB) counter
+	mov.b #0x00, R8		;b counter
+	mov.b #0x00, R9		;c(MSB) counter
+	mov.w #LCDM3, R5	;set up LCD memory pointer to R5
+
+	bis.b #00h,&P1DIR	;Make switches input
+
+L1
+	call #Print		;print current count
+	cmp.b #0x02, &P1IN 	;check if switch one is pressed
+	jeq Countup
+
+	cmp.b #0x01, &P1IN 	;check if switch two is pressed
+	jeq Countdown
+
+	jmp L1			;repeat forever
+
+;for when switch one is pressed, includes differnt cases
+Countup
+	inc R7			;inc a(lsb) cb0->cb1, cb1->cb2...
+
+	cmp #10, R7		;check if a needs reset (countup from cb9)
+	jeq upB			;if so jmp upB
+	jmp L1
+
+upB
+	inc R8			;inc b (c09->c10,c19->c20)
+
+	cmp #10, R8		;check if b needs reset aswel as a
+	jeq upC			;if so jmp upC
+	mov.b #0x00, R7		;otherwise only a is reset to 0
+	jmp L1
+
+upC
+	inc R9			;inc c(099->100,199->200)
+
+	cmp #10, R9		;check for overflow(999->000) all reset
+	jeq overflow
+	mov.b #0x00, R7		;otherwise just reset a and b then jmp L1
+	mov.b #0x00, R8		
+	jmp L1
+
+overflow			;(999->000)
+	mov.b #0x00, R7		;a=0
+	mov.b #0x00, R8		;b=0
+	mov.b #0x00, R9		;c=0
+	jmp L1
+
+
+Countdown
+	cmp #0, R7		;check if a needs reset(countdown from cb0)
+	jeq downB
+
+	dec R7			;otherwise just dec a(lsb)
+	jmp L1
+
+downB
+	cmp #0, R8		;check if a and b also needs reset(100->099...)
+	jeq downC
+
+	dec R8			;otherwise just dec b and reset a
+	mov.b #0x09, R7		;reset a with a 9
+	jmp L1
+
+downC
+	cmp #0, R9		;check if all need to be reset(000->999)
+	jeq underflow
+
+	dec R9			;otherwise just dec c and reset a and b
+	mov.b #0x09, R7		;reset a and b with 9
+	mov.b #0x09, R8
+	jmp L1
+
+underflow			;(000->999) reset all to 9
+	mov.b #0x09, R7
+	mov.b #0x09, R8
+	mov.b #0x09, R9
+	jmp L1
+
+
+Print
+	mov.b numbers(R7), R10	   ;send a to LCD memory for display
+	mov.b R10, 0(R5)
+
+	mov.b numbers(R8), R10	   ;send b to LCD memory for display
+	mov.b R10, 1(R5)
+
+	mov.b numbers(R9), R10	   ;send c to LCD memory for display
+	mov.b R10, 2(R5)
+
+	mov.w #0A000h,R15 ;Delay to R15
+L3
+	dec.w R15 	  ;Decrement R15
+	jnz L3
+
+	ret
+
+;rest unmodified
+;----------------------------------------------------------------------
+; Initialize the LCD system
+;----------------------------------------------------------------------
+Init_LCD
+; the LCD segment
+; R6 is a loop counter to cover all of the segments
+; including all special characters
+	mov.b #0x00, R6
+	mov.w #LCDM3, R5
+	mov.b #0x00, R7
+lpt mov.b R7, 0(R5)
+	inc.w R5
+	inc.b R6
+; See if the loop is finished
+	cmp.b LCD_SIZE, R6
+	jnz lpt
+	mov.b #0x1C, &P5SEL
+	mov.b #0x00, &LCDAVCTL0
+	mov.b #0x7E, &LCDAPCTL0
+	mov.b #0x7d, &LCDACTL
+	ret
+;----------------------------------------------------------------------
+; Interrupt Vectors
+;----------------------------------------------------------------------
+	.sect ".reset" ; MSP430 RESET Vector
+	.short START ;
+	.end

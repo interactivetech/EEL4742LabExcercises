@@ -1,0 +1,109 @@
+//---------------------------------------------------------------------
+// LCD Driver for the for MSP 430X4XXX experimenter board using
+// Softbaugh LCD
+// Davies book pg. 259, 260
+//---------------------------------------------------------------------
+#include "msp430fg4618.h"
+#include "stdio.h"
+#include <stdbool.h>
+#include <TIME.H>
+void Init_LCD(void);
+
+unsigned char *LCDSeg = (unsigned char *) &LCDM3;
+// there are 11 locations that are needed for the softbaugh LCD
+int LCD_SIZE=11;
+
+//Count varibles, a=LSB, c=MSB
+int a=0,b=0,c=0;
+//Array of hex values that coorespond the correct 0-F display on LCD
+				//  0      1    2   3    4    5    6    7   8     9    A    b   c    d    E     F
+int numbers[16] = {0x5F,0x06,0x6B,0x2F,0x36,0x3D,0x7D,0x07,0x7F,0x3F,0x77,0x7C,0x59,0x6E,0x79,0x71};
+
+int main(void){
+	
+	volatile unsigned int i,j; // volatile to prevent optimization
+
+	WDTCTL = WDTPW + WDTHOLD; // Stop watchdog timer
+	// setup pprt 3 as an output so to be able to turn on the LED
+	P2DIR |= 0x02; // Set P1.0 to output direction
+	// go Initialize the LCD
+	Init_LCD();
+
+	P1DIR = 0x00;   //Make switches input
+
+	//Infinite loop to display the count
+	while(true) {
+
+	
+		if(0x02 == P1IN) {    //SW1 count up
+			a++;
+		}
+
+		if(0x01 == P1IN){     //SW2 count down
+			a--;
+		}
+
+		//Different cases for counting
+
+		//If a is past 9, increase b and rest a(9->10,29->20..)
+		if(a>9){
+			b++;
+			a=0;
+		}
+		//Underflow(0->999)
+		else if(a==-1){
+			if(c==0 && b==0){		
+				a=9;
+				b=10;
+				c=9;
+			}
+			//underlow for two first bits(cb9->c(b-1)0)
+			b--;
+			a=9;
+		}
+
+		//Same for b, if past b increase c(99->100,199->200)
+		if(b>9){
+			c++;
+			b=0;
+		}
+		//Going down from b=0(0->999,100->099)
+		else if(b==-1){
+			c--;
+			b=9;
+		}
+		//Overflow(999->00)
+		if(c>9){		
+			a=0;
+			b=0;
+			c=0;
+		}
+
+		//Display each bit
+		LCDSeg[0]= numbers[a];
+		LCDSeg[1]= numbers[b];
+		LCDSeg[2]= numbers[c];
+
+		//Delay
+		for(j=0;j<10000;j++){}
+	}
+}
+//rest of code unmodified
+}
+//---------------------------------------------------------------------
+// Initialize the LCD system
+//---------------------------------------------------------------------
+void Init_LCD(void){
+
+	int n;
+	for (n=0;n<LCD_SIZE;n++){
+		
+		*(LCDSeg+n) = 0;
+		// LCDSeg[n]=0;
+	}
+
+P5SEL = 0x1C; // BIT4 | BIT3 |BIT2 = 1 P5.4, P.3, P5.2 = 1
+LCDAVCTL0 = 0x00;
+LCDAPCTL0 = 0x7E;
+LCDACTL = 0x7d;
+}

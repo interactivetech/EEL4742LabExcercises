@@ -1,0 +1,116 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;This program converts an 8-bit bin number to Hex
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	.cdecls C,LIST,"msp430fg4618.h"
+	; cdecls tells assembler to allow the device header file
+	.bss label, 4 ; allocates 4 bytes of uninitialized memory with the name label
+	.word 0x1234 ; example of defining a 16 bit word
+	.sect ".const" ; initialized data rom
+	.text ; program start
+	.global _START ; define entry point
+
+START mov.w #300h,SP ; Initialize 'x1121 stackpointer
+StopWDT mov.w #WDTPW+WDTHOLD,&WDTCTL ; Stop WDT
+SetupP1 call #Init_UART ; go initialize the uart
+
+Mainloop mov #0x08, R5	;index for loop
+	mov #0x0, R8		;Initialize to zero
+
+input call #INCHAR_UART	;receive char
+	mov R4, R7			;save in R7
+	call #OUTA_UART		;Display input
+	sub #0x31, R7		;Check if it is 0 or 1
+	jn zero				;if its neg then its zero
+	rla R8				;shift left to make room for new bit
+	add #0x01, R8		;make it 1
+	jmp one
+
+zero
+	rla R8				;shift left (make it 0)
+one
+	dec R5				;R8--
+	jnz input			;Continue loop (8 times)
+
+	mov #0xA, R4		;Newline -> R4
+	call #OUTA_UART		;Display new line
+	mov #0xD, R4		;CR
+	call #OUTA_UART
+
+	mov.b R8, R9
+	;;;R8 and R9 get converted from bin to hex and then print;;;
+
+	mov #0xF0, R10	;bit mask for first digit
+	and.b R10, R8	;AND gets first digit alone
+	rra R8			;shift right 4 bits to remove
+	rra R8			;excess zeros
+	rra R8
+	rra R8
+	mov #0x02, R13	;Index for loop
+	jmp BinThex
+
+next
+	mov R8, R4		;load to print
+	call #OUTA_UART	;display char/number
+	dec R13			;R13-- for loop
+	jz print		;Second digit is done, go print LF and CR
+	mov #0x0F, R11	;bit mask for second digit
+	and.b R11, R9	;AND gets second digit alone
+	mov R9, R8		;Move to R8 for conversion
+
+BinThex
+	mov R8, R11		;Keep R8 preserved
+	sub #0xA, R11 	;check if output should be a letter
+	jn Number 	 	;jump if negative (its a number)
+	add #0x37, R8	;Convert to letter
+	jmp next		;jump back up
+
+Number add #0x30, R8	;convert to number between 0-9
+	jmp next			;jump back up
+
+
+print
+	mov #0xA, R4	;Newline -> R4
+	call #OUTA_UART	;Display new line
+	mov #0xD, R4	;CR
+	call #OUTA_UART
+
+	jmp Mainloop ;Loop forever
+
+
+OUTA_UART ; prints value stored in register 4 and uses register 5 as a temp value
+	push R5
+lpa mov.b &IFG2,R5
+	and.b #0x02,R5
+	cmp.b #0x00,R5
+	jz lpa
+	; send the data to the transmit buffer UCA0TXBUF = A;
+	mov.b R4,&UCA0TXBUF
+	pop R5
+	ret
+
+INCHAR_UART ; returns the ASCII value in register 4
+; wait for the receive buffer is full before getting the data
+	push R5
+lpb mov.b &IFG2,R5
+	and.b #0x01,R5
+	cmp.b #0x00,R5
+	jz lpb
+	mov.b &UCA0RXBUF,R4
+	pop R5
+	ret 	; go get the char from the receive buffer
+
+Init_UART
+	mov.b #0x30,&P2SEL ; transmit and receive to port 2 b its 4 and 5
+	mov.b #0x00,&UCA0CTL0 ;8 data, no parity 1 stop, uart, async
+	mov.b #0x41,&UCA0CTL1 ;UART mode, (0) 0 = async, UCA0CTL1= 0x41;
+	mov.b #0x00,&UCA0BR1 ;UCA0BR1=0 upper byte of divider clock word
+	mov.b #0x03,&UCA0BR0 ;clock divide from a clock to bit clock 32768/9600 = 3.413
+	mov.b #0x06,&UCA0MCTL ;for the baud rate
+	mov.b #0x00,&UCA0STAT ;do not loop the transmitter back to the receiver for echoing
+	mov.b #0x40,&UCA0CTL1 ; take UART out of reset
+	mov.b #0x00,&IE2 ; turn transmit interrupts off
+	ret
+	.sect ".reset" ; MSP430 RESET Vector
+	.short START ;
+	.end

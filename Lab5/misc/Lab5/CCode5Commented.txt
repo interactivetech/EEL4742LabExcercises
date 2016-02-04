@@ -1,0 +1,220 @@
+//---------------------------------------------------------------------
+// LCD Driver for the for MSP 430X4XXX experimenter board using
+// Softbaugh LCD
+//---------------------------------------------------------------------
+#include "msp430fg4618.h"
+#include "stdio.h"
+#include <stdbool.h>
+#include <ctype.h>
+#include <TIME.H>
+
+void Init_LCD(void);
+void Init_UART(void);
+void OUTA_UART(unsigned char A);
+unsigned char INCHAR_UART(void);
+
+//Takes in each digit and converts to a hexadecimal digit
+int convertToHex(unsigned char z);
+//Converts each digit to cooresponding ASCII number to be printed
+char convertToASCII(volatile unsigned char hexA);
+
+unsigned char *LCDSeg = (unsigned char *) &LCDM3;
+// there are 11 locations that are needed for the softbaugh LCD
+int LCD_SIZE=11;
+
+//Array of hex values that correspond the correct 0-F display on LCD
+		 //  0     1    2    3    4    5    6    7   8   9    A    B    C    D    E    F    -   Blank
+int numbers[18] = {0x5F,0x06,0x6B,0x2F,0x36,0x3D,0x7D,0x07,0x7F,0x3F,0x77,0x7C,0x59,0x6E,0x79,0x71,0x20,0x00};
+
+
+int main(void){
+
+	volatile unsigned int i,j; // volatile to prevent optimization
+	WDTCTL = WDTPW + WDTHOLD; // Stop watchdog timer
+
+	//5 Input chars
+	volatile unsigned char a,b,c,d,e;
+
+	//Converted inputs into hex
+	int hexA,hexB,hexD,hexE;
+	//Output result split into each digit to be displayed	
+	int hex0,hex1,hex2,hex3;
+
+	//Combined the pairs of hexadecimal digits into one hexadecimal number		
+	int number1,number2;
+	unsigned int output;
+
+	//Check for negative case
+	int negative = 0;
+
+	// go Initialize the LCD and UART
+	Init_LCD();
+	Init_UART();
+
+	while(true) {
+
+		negative =0;
+
+		//Read in each char with echo and convert to hex, dont convert operator
+		a=INCHAR_UART();
+		OUTA_UART(a);
+		//Takes in a char and converts to hex
+		hexA=convertToHex(a);
+
+		b=INCHAR_UART();
+		OUTA_UART(b);
+		hexB=convertToHex(b);
+
+		//Operator
+		c=INCHAR_UART();
+		OUTA_UART(c);
+
+		d=INCHAR_UART();
+		OUTA_UART(d);
+		hexD=convertToHex(d);
+
+		e=INCHAR_UART();
+		OUTA_UART(e);
+		hexE=convertToHex(e);
+
+
+		//For addition get number1 and number2 and then add
+		//hexA is digit 1, hexB is digit 2, number1 is hexA and hexB combined
+		if(c == '+'){
+			number1 = 16*hexA + hexB;
+			number2 = 16*hexD + hexE;
+			output= number1+number2;
+		}
+		
+		//For subtraction get number1 and number2 then subtract
+		if(c == '-'){
+			number1 = 16*hexA + hexB;
+			number2 = 16*hexD + hexE;
+
+			//Case for a negative number, set check=1 and switch subtract direction
+			if(number1<number2){
+				output=number2-number1;
+				negative = 1;
+			}
+			else
+				output= number1-number2;
+		}
+
+		//For multiplaction, get number1 and number 2 and then multiply
+		if(c == '*'){
+			number1 = 16*hexA + hexB;
+			number2 = 16*hexD + hexE;
+			output= number1*number2;
+		}
+
+		//Output broken into indivdual digits to be displayed on LCD/HT
+		hex0=(output/0x1000);
+		hex1=((output&0xF00)/0x100);
+		hex2=((output&0x0F0)/0x010);
+		hex3=(output%0x10);
+
+		//Print "="
+		OUTA_UART(0x3D);
+
+		//If negative set, fourth LCDseg to null, third to negative sign
+		if(negative == 1){
+			LCDSeg[3]= numbers[17];
+			LCDSeg[2]= numbers[16];
+			OUTA_UART(0x2D);
+		}
+		else{
+			//Otherwise print each converted digit to HT/LCD
+			OUTA_UART(convertToASCII(hex0));
+			LCDSeg[3]= numbers[hex0];
+
+			LCDSeg[2]= numbers[hex1];
+			OUTA_UART(convertToASCII(hex1));
+		}
+	
+		//Print last two digits normally
+		LCDSeg[1]= numbers[hex2];
+		LCDSeg[0]= numbers[hex3];
+
+		OUTA_UART(convertToASCII(hex2));
+		OUTA_UART(convertToASCII(hex3));
+
+		//Skip line, move cursor
+		OUTA_UART(0x0A);
+		OUTA_UART(0x0D);
+	}
+
+}
+
+//Converts each digit to cooresponding ASCII number to be printed
+char convertToASCII(volatile unsigned char hex)
+{
+    char binA;
+    //If char is Letter
+    if(hex >= 10){                     
+    	//convert to ASCII by moving to 0000 and adding 10 and input letter
+         binA = hex + 'A' - 10;
+    }
+    else            //If Char is number
+	//convert to binary by moving to 0000 and adding input number
+         binA = hex + '0';
+
+    return binA;
+}
+
+//Takes in each digit and converts to a hexadecimal digit
+int convertToHex(unsigned char z){
+
+	int hexZ;
+	
+	//If a number
+	if(z < 58)
+		hexZ = (int)(z)-48;
+	else	//If a lettter
+		hexZ = (int)(z)-55;
+
+	return hexZ;
+}
+
+//rest of code unmodified
+void OUTA_UART(unsigned char A){
+				do{
+		}while ((IFG2&0x02)==0);
+		UCA0TXBUF = A;
+}
+unsigned char INCHAR_UART(void){
+		do{
+		}while ((IFG2&0x01)==0);
+		return (UCA0RXBUF);
+}
+
+void Init_UART(void){
+
+		P2SEL=0x30; // transmit and receive to port 2 b its 4 and 5
+
+		UCA0CTL0=0; // 8 data, no parity 1 stop, uart, async
+		UCA0CTL1= 0x41;
+		UCA0BR1=0; // upper byte of divider clock word
+		UCA0BR0=3; // clock divide from a clock to bit clock 32768/9600
+		UCA0MCTL=0x06;
+		UCA0STAT=0; // do not loop the transmitter back to the
+		UCA0CTL1=0x40;
+		IE2=0; // turn transmit interrupts off
+		}
+
+//---------------------------------------------------------------------
+// Initialize the LCD system
+//---------------------------------------------------------------------
+void Init_LCD(void){
+
+	int n;
+	for (n=0;n<LCD_SIZE;n++){
+
+		*(LCDSeg+n) = 0;
+		// LCDSeg[n]=0;
+	}
+
+P5SEL = 0x1C; // BIT4 | BIT3 |BIT2 = 1 P5.4, P.3, P5.2 = 1
+LCDAVCTL0 = 0x00;
+LCDAPCTL0 = 0x7E;
+LCDACTL = 0x7d;
+}

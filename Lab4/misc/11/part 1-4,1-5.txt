@@ -1,0 +1,2 @@
+LCDSeg[0]=0x6B; //part 1-4
+LCDSeg[6]=0x6B;	//part 1-5

@@ -1,0 +1,479 @@
+;****************************************************************
+; Console I/O through the on board UART for MSP 430X4XXX
+; experimenter board RAM at 0x1100 - 0x30ff, FLASH at 0x3100;
+; - 0xfbff
+;****************************************************************
+		.cdecls C,LIST,"msp430fg4618.h"
+; cdecls tells assembler to allow the device header file
+;----------------------------------------------------------------------
+; the .sect directives are defined in lnk_msp430f4618.cmd
+; .sect ".stack" ; data ram for the stack
+; .sect ".const" ; data rom for initialized data
+; constants
+; .sect ".text" ; program rom for code
+; .sect ".cinit" ; program rom for global inits
+; .sect ".reset" ; MSP430 RESET Vector
+		.sect ".sysmem" ; data ram for initialized
+; variables
+; there are 11 locations that are needed for the softbaugh LCD
+; only 7 used for the seven segment displays
+LCD_SIZE
+		.byte 11 ; eleven bytes needed by the LCD
+
+Digits
+		.byte 0x5F,0x06,0x6B,0x2F,0x36,0x3D,0x7D,0x07,0x7F,0x37,0x77,0x7C,0x59,0x6E,0x79,0x71
+;----------------------------------------------------------------
+; Main Code
+;----------------------------------------------------------------
+
+			.text ; program start
+			.global _START ; define entry point
+;----------------------------------------------------------------
+
+START 		mov.w #300h,SP 					;Initialize 'x1121 stackpointer
+StopWDT 	mov.w #WDTPW+WDTHOLD,&WDTCTL 	; Stop WDT
+
+			call #Init_UART		;initiate UART
+			call #Init_LCD		;initiate LCD
+			mov.w #LCDM3, R8
+
+
+Mainloop
+
+	call #twoHexnumb			;take in our first hex number
+	mov.w R10, R11				;R11 will have the first hex num
+	mov.w #0x20, R4				;print a space in hyperterminal
+	call #OUTA_UART
+
+	call #INCHAR_UART			;take in our arithmetic sign
+	call #OUTA_UART
+	mov.w R4, R5				;R5 will have the sign
+
+	mov.w #0x20, R4
+	call #OUTA_UART
+
+	call #twoHexnumb			;take in our second hex number
+	mov.w R10, R12				;R12 will have the second hex num
+
+	mov.w #0x20, R4				;print space
+	call #OUTA_UART
+	mov.w #0x3D, R4				;print equal sign
+	call #OUTA_UART
+	mov.w #0x20, R4
+	call #OUTA_UART
+
+
+;check to see what arithmetic operation is in R5
+	cmp.w #0x2B, R5
+	jeq sum
+	cmp.w #0x2D, R5
+	jeq minus
+	cmp.w #0x2A, R5
+	jeq multi
+
+
+;If addition
+sum
+	add.w R11, R12				;store sum in R12
+	call #printHex				;send result(R12) to the print function
+	jmp continue
+
+
+
+;If subtraction
+minus
+	cmp.w R12, R11				;check if R11 is greater or equal to R12
+	jge minusIf
+	sub.w R11, R12
+	mov.w #0x2D, R4				;print negative sign
+	call #OUTA_UART
+	mov.b #0x20, 2(R8)			;display negative sign on LCD
+	call #printHex				;send result (R12) to the print function
+	jmp continue
+
+minusIf
+	mov.b #0x00, 2(R8)			;clear position 2 of LDC display
+	sub.w R12, R11
+	mov.w R11, R12				;move result to R12
+	call #printHex				;send result (R12) to the print function
+	jmp continue
+
+
+
+;If multiplication
+multi
+	mov.w #0x00, R14
+	mov.w #0x00, R4
+
+Rotate
+	cmp #0x08, R4
+	jeq Exit
+	rrc.w R12
+	jc addi
+
+multCont
+	rla.w R11
+	inc.b R4
+	jmp Rotate
+
+addi
+	add.w R11, R14
+	jmp multCont
+
+Exit
+	mov.w R14, R12
+	call #printHex
+	jmp continue
+
+
+
+continue
+	mov.w #0x0A, R4				;go to next line
+	call #OUTA_UART
+	mov.w #0x0D, R4
+	call #OUTA_UART
+	jmp Mainloop				;infinite loop
+
+
+
+printHex
+	mov.w #Digits, R7			;
+	mov.w R12, R13
+	mov.w R12, R14
+	mov.w R12, R15
+
+	cmp.w #0x2A, R5				;check if multiplication
+	jnz L1						;if not, jump
+
+;if multiplication do this
+    swpb R12
+	and.w #0x00F0, R12			;AND and...
+	rra.w R12				;...rotate right four times in order...
+	rra.w R12				;...to get forth digit of LCD display
+	rra.w R12
+	rra.w R12
+	mov.w R12, R4				;R4 will be sent to UART
+	add.w R7, R12				;get address of digit to be displayed
+	mov.b 0(R12), 3(R8)			;display digit on LCD
+	call #HextoASCII			;get ASCII value
+	call #OUTA_UART
+
+;if addition or multiplication do this
+L1	cmp.w #0x2B, R5				;check if addition
+	jeq L3						;if so, jump
+	cmp.w #0x2A, R5				;check if multiplication
+	jeq L3						;if so, jump
+	jmp cont2					;if neither condotion is met, jump
+
+;if addition do this
+L3	cmp.w #0x2B, R5				;check if addition
+	jnz L4						;if not, jump
+	mov.b #0x00, 3(R8)			;clear position 3 of LDC display
+
+;if addition and multiplication cont. here
+L4	swpb R13
+	and.w #0x000F, R13			;AND to get third digit of LCD
+	mov.w R13, R4				;R4 will be sent to UART
+	add.w R7, R13				;get address of digit to be displayed
+	mov.b 0(R13), 2(R8)			;display digit on LCD
+	call #HextoASCII			;get ASCII value
+	call #OUTA_UART
+
+;if subtraction do this
+cont2
+	cmp.w #0x2D, R5				;check if subtraction
+	jnz cont3					;if not, jump
+	mov.b #0x00, 3(R8)			;clear position 3 of LDC display
+
+;all operations do this
+cont3
+	and.w #0x00F0, R14			;AND and...
+	rra.w R14					;...rotate right four times in order...
+	rra.w R14					;...to get second digit of LCD display
+	rra.w R14
+	rra.w R14
+	mov.w R14, R4				;R4 will be sent to UART
+	add.w R7, R14				;get address of digit to be displayed
+	mov.b 0(R14), 1(R8)			;display digit on LCD
+	call #HextoASCII			;get ASCII value
+	call #OUTA_UART
+
+	and.w #0x000F, R15			;AND to get first digit of LCD
+	mov.w R15, R4				;R4 will be sent to UART
+	add.w R7, R15				;get address of digit to be displayed
+	mov.b 0(R15), 0(R8)			;display digit on LCD
+	call #HextoASCII			;get ASCII value
+	call #OUTA_UART
+	ret
+
+
+;converts decimal value to an ASCII value
+HextoASCII
+	push.w R5
+	mov.w #0x00, R5
+	mov.w #0x0A, R6
+	cmp.w R5, R4				;condition to check if R4 is a...
+	jl letter2					;...number(R4>=0 && R4<10)
+	cmp.w R6, R4				;
+	jge letter2					;
+	add.w #0x30, R4				;if so, add 0x30
+	pop.w R5
+	ret
+
+letter2
+	add.w #0x37, R4				;if R4 is a letter, add 0x37
+	pop.w R5
+	ret
+
+
+;gets a hex number
+twoHexnumb
+	push.w R4
+	push.w R5
+	push.w R6
+
+	call #INCHAR_UART			;take in first digit and store in R5
+	call #OUTA_UART
+	mov.w R4, R5
+
+	call #INCHAR_UART			;take in second digit and store in R6
+	call #OUTA_UART
+	mov.w R4, R6
+
+	mov.w R5, R4
+	call #ASCIItoDecimal		;
+	mov.w R10, R4
+	rla.w R4					;
+	rla.w R4
+	rla.w R4
+	rla.w R4
+	mov.w R4, R5
+
+	mov.w R6, R4
+	call #ASCIItoDecimal		;
+	mov.w R10, R6
+
+	add.w R6, R5				;Return value will be in R10
+	mov.w R5, R10
+
+	pop.w R6
+	pop.w R5
+	pop.w R4
+	ret
+
+
+;Converts ASCII to a decimal value
+ASCIItoDecimal					;gets R4 and returns it in R10
+	push.w R4
+	push.w R5
+	push.w R6
+
+	mov.w R4, R10				;checks if it is a number
+	mov.w #0x30, R5
+	mov.w #0x3A, R6
+	cmp.w R5, R10
+	jl letter
+	cmp.w R6, R10
+	jge letter
+	sub.w #0x30, R10			;if number subtract 0x30
+	pop.w R6
+	pop.w R5
+	pop.w R4
+	ret
+
+letter							;checks if it is a letter
+	mov.w #0x41, R5
+	mov.w #0x47, R6
+	cmp.w R5, R10
+	jl L2
+	cmp.w R6, R10
+	jge L2
+	sub.w #0x37, R10			;if letter subtract 0x37
+	pop.w R6
+	pop.w R5
+	pop.w R4
+L2	ret
+
+
+
+
+
+;----------------------------------------------------------------------
+; Initialize the LCD system
+;----------------------------------------------------------------------
+Init_LCD
+; Using the LCD A controller for the MSP430fg4618
+; the pins of the LCD are memory mapped onto the mp430F4xxx
+; memory bus and
+; are accessed via LCDSeg[i] array
+; See page 260 of Davie's text
+; LCD_SIZE-4 only gives the 7 segment displays plus DP, and
+; (colons are the same bit setting)
+; LCD_SIZE-4 only gives the 7 segment displays plus DP, and
+; colons: colons / dp
+; Right most seven segment display is at LCDSeg[0];
+; Display format
+; AAA
+; F B
+; X F B
+; GGG
+; X E C
+; E C
+; DP DDD
+; bit order
+; dp, E, G, F, D, C, B, A or
+; :, E, G, F, D, C, B, A
+; initialize the segment memory to zero to clear the LCD
+; writing a zero in the LCD memory location clears turns off
+
+; the LCD segment
+; R6 is a loop counter to cover all of the segments
+; including all special characters
+		mov.b #0x00, R6
+; R5 points to the beginning memory for the LCD
+		mov.w #LCDM3, R5
+; move 0 into R7 to clear the LCD memory
+		mov.b #0x00, R7
+lpt
+		mov.b R7, 0(R5)
+; Increment R5 to point to the next seven segment display
+; Increment R6 for the next count in the loop
+		inc.w R5
+		inc.b R6
+; See if the loop is finished
+		cmp.b LCD_SIZE, R6
+		jnz lpt
+; Port 5 ports 5.2-5.4 are connected to com1,com2,com3 of LCD
+; com0 fixed and already assigned
+; Need to assign com1 - com3 to port5
+; BIT4 | BIT3 |BIT2 = 1 P5.4, P.3, P5.2 = 1
+		mov.b #0x1C, &P5SEL
+; Used the internal voltage for the LCD bit 4 = 0 (VLCDEXT=0)
+; internal bias voltage set to 1/3 of Vcc, charge pump
+; disabled,
+; page 26-25 of MSP430x4xx user manual
+		mov.b #0x00, &LCDAVCTL0
+; LCDS28-LCDS0 pins LCDS0 = lsb and LCDS28 = MSB need
+; LCDS4 through LCDS24
+; from the experimenter board schematic the LCD uses S4-S24,
+; S0-S3 are not used here
+; Only use up to S24 on the LCD 28-31 not needed.
+; Also LCDACTL1 not required since not using S32 - S39
+; Davie's book page 260
+; page 26-23 of MSP430x4xx user manual
+		mov.b #0x7E, &LCDAPCTL0
+; The LCD uses the ACLK as the master clock as the scan
+; rate for the display segments
+; The ACLK has been set to 32768 Hz with the external 327768 Hz
+; crystal
+; Let's use scan frequency of 256 Hz (This is fast enough not
+; to see the display flicker)
+; or a divisor of 128
+; LCDFREQ division(3 bits), LCDMUX (2 bits), LCDSON segments
+; on, Not used, LCDON LCD module on
+; 011 = freq /128, 11 = 4 mux's needed since the display uses
+; for common inputs com0-com3
+; need to turn the LCD on LCDON = 1
+; LCDSON allows the segments to be blanked good for blinking
+; but needs to be on to
+; display the LCD segments LCDSON = 1
+; Bit pattern required = 0111 1101 = 0x7d
+; page 26-22 of MSP430x4xx user manual
+		mov.b #0x7d, &LCDACTL
+		ret
+
+
+
+OUTA_UART
+;----------------------------------------------------------------
+; prints to the screen the ASCII value stored in register 4 and
+; uses register 5 as a temp value
+;----------------------------------------------------------------
+; IFG2 register (1) = 1 transmit buffer is empty,
+; UCA0TXBUF 8 bit transmit buffer
+; wait for the transmit buffer to be empty before sending the
+; data out
+	push R5
+lpa mov.b &IFG2,R5
+	and.b #0x02,R5
+	cmp.b #0x00,R5
+	jz lpa
+; send the data to the transmit buffer UCA0TXBUF = A;
+	mov.b R4,&UCA0TXBUF
+	pop R5
+	ret
+INCHAR_UART
+;----------------------------------------------------------------
+; returns the ASCII value in register 4
+;----------------------------------------------------------------
+; IFG2 register (0) = 1 receive buffer is full,
+; UCA0RXBUF 8 bit receive buffer
+; wait for the receive buffer is full before getting the data
+	push R5
+lpb mov.b &IFG2,R5
+	and.b #0x01,R5
+	cmp.b #0x00,R5
+	jz lpb
+	mov.b &UCA0RXBUF,R4
+	pop R5
+; go get the char from the receive buffer
+	ret
+Init_UART
+;----------------------------------------------------------------
+; Initialization code to set up the uart on the experimenter board to 8 data,
+; 1 stop, no parity, and 9600 baud, polling operation
+;----------------------------------------------------------------
+;P2SEL=0x30;
+; transmit and receive to port 2 b its 4 and 5
+	mov.b #0x30,&P2SEL
+; Bits p2.4 transmit and p2.5 receive UCA0CTL0=0
+; 8 data, no parity 1 stop, uart, async
+	mov.b #0x00,&UCA0CTL0
+; (7)=1 (parity), (6)=1 Even, (5)= 0 lsb first,
+; (4)= 0 8 data / 1 7 data, (3) 0 1 stop 1 / 2 stop, (2-1) --
+; UART mode, (0) 0 = async
+; UCA0CTL1= 0x41;
+	mov.b #0x41,&UCA0CTL1
+; select ALK 32768 and put in software reset the UART
+; (7-6) 00 UCLK, 01 ACLK (32768 hz), 10 SMCLK, 11 SMCLK
+; (0) = 1 reset
+;UCA0BR1=0;
+; upper byte of divider clock word
+	mov.b #0x00,&UCA0BR1
+;UCA0BR0=3; ;
+; clock divide from a clock to bit clock 32768/9600 = 3.413
+	mov.b #0x03,&UCA0BR0
+; UCA0BR1:UCA0BR0 two 8 bit reg to from 16 bit clock divider
+; for the baud rate
+;UCA0MCTL=0x06;
+; low frequency mode module 3 modulation pater used for the bit
+; clock
+	mov.b #0x06,&UCA0MCTL
+;UCA0STAT=0;
+; do not loop the transmitter back to the receiver for echoing
+	mov.b #0x00,&UCA0STAT
+; (7) = 1 echo back trans to rec
+; (6) = 1 framing, (5) = 1 overrun, (4) =1 Parity, (3) = 1 break
+; (0) = 2 transmitting or receiving data
+;UCA0CTL1=0x40;
+; take UART out of reset
+	mov.b #0x40,&UCA0CTL1
+;IE2=0;
+; turn transmit interrupts off
+	mov.b #0x00,&IE2
+; (0) = 1 receiver buffer Interrupts enabled
+; (1) = 1 transmit buffer Interrupts enabled
+;----------------------------------------------------------------
+;****************************************************************
+;----------------------------------------------------------------
+; IFG2 register (0) = 1 receiver buffer is full, UCA0RXIFG
+; IFG2 register (1) = 1 transmit buffer is empty, UCA0RXIFG
+; UCA0RXBUF 8 bit receiver buffer, UCA0TXBUF 8 bit transmit
+; buffer
+	ret
+;----------------------------------------------------------------
+; Interrupt Vectors
+;----------------------------------------------------------------
+	.sect ".reset" ; MSP430 RESET Vector
+	.short START ;
+	.end
