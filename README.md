@@ -1,5 +1,5 @@
 # EEL4742 Lab Excercises
-This is a repository of the EEL4742 course lab coding exercises I co-completed on the MSP-EXP430G2 development board, written in C and Assembly 
+This is a repository of the EEL4742 Embedded Systems course lab coding exercises I co-completed on the MSP-EXP430G2 development board, written in C and Assembly 
 
 There are 4 labs, and each lab contains:
 
