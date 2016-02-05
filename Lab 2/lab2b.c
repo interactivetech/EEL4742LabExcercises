@@ -16,6 +16,7 @@ int main(void){
     WDTCTL = WDTPW + WDTHOLD; // Stop watchdog timer
     //initalized UART communication with MSP430 to hyperterminal
     Init_UART();
+    
     while(i!=0){
         a=INCHAR_UART();//function that reads character from keyboard
         if(a=='0x00'){//if character enter is null, break loop
